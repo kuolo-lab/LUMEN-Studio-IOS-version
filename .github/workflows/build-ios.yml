@@ -24,21 +24,37 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Check project files
+      - name: Find and check project directory
+        shell: bash
         run: |
-          echo "Repository root:"
-          pwd
-          ls -la
+          echo "Searching for the LUMEN Studio project..."
 
-          if [ ! -f package.json ]; then
-            echo "::error::package.json was not found at the repository root."
+          PACKAGE=$(find . -maxdepth 5 \
+            -type f -name package.json \
+            -not -path '*/node_modules/*' \
+            -print -quit)
+
+          if [ -z "$PACKAGE" ]; then
+            echo "::error::No package.json found in the repository."
+            find . -maxdepth 4 -type f | head -100
             exit 1
           fi
 
-          if [ ! -f capacitor.config.ts ] && [ ! -f capacitor.config.json ] && [ ! -f capacitor.config.js ]; then
-            echo "::error::No Capacitor configuration was found at the repository root."
+          PROJECT_DIR=$(dirname "$PACKAGE")
+
+          if [ ! -f "$PROJECT_DIR/capacitor.config.ts" ] && \
+             [ ! -f "$PROJECT_DIR/capacitor.config.json" ] && \
+             [ ! -f "$PROJECT_DIR/capacitor.config.js" ] && \
+             [ ! -f "$PROJECT_DIR/capacitor.config.mjs" ]; then
+            echo "::error::No Capacitor configuration found beside package.json."
+            echo "Project directory: $PROJECT_DIR"
+            ls -la "$PROJECT_DIR"
             exit 1
           fi
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Found project directory: $PROJECT_DIR"
+          ls -la "$PROJECT_DIR"
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -51,18 +67,22 @@ jobs:
           xcode-select -p
 
       - name: Install dependencies
+        working-directory: ${{ env.PROJECT_DIR }}
         run: npm install
 
       - name: Match Capacitor iOS version
+        working-directory: ${{ env.PROJECT_DIR }}
         run: |
           CAP_VERSION=$(node -p "require('./node_modules/@capacitor/core/package.json').version")
           echo "Capacitor core version: $CAP_VERSION"
           npm install "@capacitor/ios@$CAP_VERSION"
 
       - name: Build web app
+        working-directory: ${{ env.PROJECT_DIR }}
         run: npm run build
 
       - name: Add iOS platform if needed
+        working-directory: ${{ env.PROJECT_DIR }}
         run: |
           if [ ! -d ios/App ]; then
             npx cap add ios
@@ -71,9 +91,11 @@ jobs:
           fi
 
       - name: Sync Capacitor iOS
+        working-directory: ${{ env.PROJECT_DIR }}
         run: npx cap sync ios
 
       - name: Build iOS Simulator app
+        working-directory: ${{ env.PROJECT_DIR }}
         run: |
           xcodebuild \
             -workspace ios/App/App.xcworkspace \
@@ -86,6 +108,7 @@ jobs:
             build
 
       - name: Package app artifact
+        working-directory: ${{ env.PROJECT_DIR }}
         run: |
           APP_PATH="build/ios/Build/Products/Debug-iphonesimulator/App.app"
 
@@ -103,6 +126,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Lumen-Studio-iOS-Simulator
-          path: Lumen-Studio-iOS-Simulator.zip
+          path: ${{ env.PROJECT_DIR }}/Lumen-Studio-iOS-Simulator.zip
           if-no-files-found: error
           retention-days: 14
